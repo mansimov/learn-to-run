@@ -4,10 +4,15 @@ import numpy as np
 import tensorflow as tf
 from gym import spaces
 from collections import deque
+import baselines.common.tf_util as U
+
 
 def sample(logits):
     noise = tf.random_uniform(tf.shape(logits))
     return tf.argmax(logits - tf.log(-tf.log(noise)), 1)
+
+def gaussian_sample(mean, std):
+    return mean + std * tf.random_normal(tf.shape(std))
 
 def cat_entropy(logits):
     a0 = logits - tf.reduce_max(logits, 1, keep_dims=True)
@@ -56,6 +61,24 @@ def fc(x, scope, nh, act=tf.nn.relu, init_scale=1.0):
         z = tf.matmul(x, w)+b
         h = act(z)
         return h
+
+def dense(x, size, name, weight_init=None, bias_init=0, weight_loss_dict=None, reuse=None):
+    with tf.variable_scope(name, reuse=reuse):
+        assert (len(U.scope_name().split('/')) == 2)
+
+        w = tf.get_variable("w", [x.get_shape()[1], size], initializer=weight_init)
+        b = tf.get_variable("b", [size], initializer=tf.constant_initializer(bias_init))
+        weight_decay_fc = 3e-4
+
+        if weight_loss_dict is not None:
+            weight_decay = tf.multiply(tf.nn.l2_loss(w), weight_decay_fc, name='weight_decay_loss')
+            if weight_loss_dict is not None:
+                weight_loss_dict[w] = weight_decay_fc
+                weight_loss_dict[b] = 0.0
+
+            tf.add_to_collection(U.scope_name().split('/')[0] + '_' + 'losses', weight_decay)
+
+        return tf.nn.bias_add(tf.matmul(x, w), b)
 
 def batch_to_seq(h, nbatch, nsteps, flat=False):
     if flat:
