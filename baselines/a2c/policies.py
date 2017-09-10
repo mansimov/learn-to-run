@@ -2,6 +2,7 @@ import numpy as np
 import tensorflow as tf
 from baselines.a2c.utils import conv, fc, dense, conv_to_fc, batch_to_seq, seq_to_batch, lstm, lnlstm, sample, gaussian_sample, check_shape
 from baselines.common.distributions import make_pdtype
+from baselines.common.running_mean_std import RunningMeanStd
 import baselines.common.tf_util as U
 import gym
 
@@ -96,8 +97,15 @@ class MlpPolicy(object):
         nact = ac_space.shape[0]
         X = tf.placeholder(tf.float32, ob_shape) #obs
         self.pdtype = pdtype = make_pdtype(ac_space)
+        with tf.variable_scope("obfilter", reuse=reuse):
+            self.ob_rms = RunningMeanStd(shape=ob_space.shape)
+        with tf.variable_scope("retfilter", reuse=reuse):
+            self.ret_rms = RunningMeanStd(shape=(1,))
+
+        obz = tf.clip_by_value((X - self.ob_rms.mean) / self.ob_rms.std, -5.0, 5.0)
+
         with tf.variable_scope("model", reuse=reuse):
-            h1 = tf.nn.tanh(dense(X, 64, "fc1", weight_init=U.normc_initializer(1.0), bias_init=0.0))
+            h1 = tf.nn.tanh(dense(obz, 64, "fc1", weight_init=U.normc_initializer(1.0), bias_init=0.0))
             h2 = tf.nn.tanh(dense(h1, 64, "fc2", weight_init=U.normc_initializer(1.0), bias_init=0.0))
             mean = dense(h2, nact, "mean", weight_init=U.normc_initializer(0.1), bias_init=0.0)
             logstd = tf.get_variable("logstd", [nact], tf.float32, tf.zeros_initializer())
@@ -121,6 +129,7 @@ class MlpPolicy(object):
 
         self.X = X
         self.vf = vf
+        self.vnorm = (self.vf - self.ret_rms.mean) / tf.maximum(self.ret_rms.std, 1.)
         self.step = step
         self.value = value
 

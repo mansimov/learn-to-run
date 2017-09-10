@@ -15,6 +15,8 @@ from baselines.a2c.utils import discount_with_dones, EpisodeStats
 from baselines.a2c.utils import Scheduler, make_path, find_trainable_variables
 from baselines.a2c.utils import mse
 
+import baselines.common.tf_util as U
+
 class Model(object):
 
     def __init__(self, policy, ob_space, ac_space, nenvs, nsteps, nstack, num_procs,
@@ -37,17 +39,9 @@ class Model(object):
 
         eps = 1e-6
 
-        # Normalising obs and returns for Mujoco.
-        #nadv = ADV / (train_model.ret_rms.std + eps)
-        #nr = (R - train_model.ret_rms.mean) / (train_model.ret_rms.std + eps)
-
-        nadv = ADV
-        nr = R
-
         nlogpac = -train_model.pd.logp(A)
-        pg_loss = tf.reduce_mean(nadv * nlogpac)
-        #vf_loss = tf.reduce_mean(mse(tf.squeeze(train_model.vnorm), nr))
-        vf_loss = tf.reduce_mean(mse(tf.squeeze(train_model.vf), nr))
+        pg_loss = tf.reduce_mean(ADV * nlogpac)
+        vf_loss = tf.reduce_mean(mse(tf.squeeze(train_model.vf), R))
 
         entropy = tf.reduce_mean(train_model.pd.entropy())
         loss = pg_loss - entropy*ent_coef + vf_loss * vf_coef
@@ -58,41 +52,30 @@ class Model(object):
             grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
         grads = list(zip(grads, params))
         trainer = tf.train.RMSPropOptimizer(learning_rate=LR, decay=rprop_alpha, epsilon=rprop_epsilon)
-        _opt_op = trainer.apply_gradients(grads)
-        """
-        with tf.control_dependencies([_opt_op]):
-            # TODO: what about polyak updating of the rms variables
-            update_ops = train_model.ob_rms._updates + train_model.ret_rms._updates #+ [ema_apply_op]
-            print(update_ops)
-            _train = tf.group(*update_ops)
-        """
-        _train = _opt_op
+        _train = trainer.apply_gradients(grads)
+
         lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
-        """
         avg_norm_ret = tf.reduce_mean(tf.abs(train_model.ret_rms.mean))
         avg_norm_obs = tf.reduce_mean(tf.abs(train_model.ob_rms.mean))
-        """
+
         def train(obs, states, returns, masks, actions, values):
+
             advs = returns - values
+            advs = (advs - np.mean(advs)) / (np.std(advs) + eps)
             for step in range(len(obs)):
                 cur_lr = lr.value()
-            #td_map = {train_model.X:obs, A:actions, ADV:advs, R:returns, LR:cur_lr, train_model.ret_rms.x:returns, train_model.ob_rms.x:obs}
+            if hasattr(train_model, "ob_rms"): train_model.ob_rms.update(sess, obs) # update running mean/std for observations of policy
             td_map = {train_model.X:obs, A:actions, ADV:advs, R:returns, LR:cur_lr}
             if states != []:
                 td_map[train_model.S] = states
                 td_map[train_model.M] = masks
-            """
-            ravg_norm_ret, ravg_norm_obs, policy_loss, value_loss, policy_entropy, _ = sess.run(
-                [avg_norm_ret, avg_norm_obs, pg_loss, vf_loss, entropy, _train],
+
+            ravg_norm_obs, policy_loss, value_loss, policy_entropy, _ = sess.run(
+                [avg_norm_obs, pg_loss, vf_loss, entropy, _train],
                 td_map
             )
-            return ravg_norm_ret, ravg_norm_obs, policy_loss, value_loss, policy_entropy
-            """
-            policy_loss, value_loss, policy_entropy, _ = sess.run(
-                [pg_loss, vf_loss, entropy, _train],
-                td_map
-            )
-            return policy_loss, value_loss, policy_entropy
+            return ravg_norm_obs, policy_loss, value_loss, policy_entropy
+
         def save(save_path):
             ps = sess.run(params)
             make_path(save_path)
@@ -223,8 +206,8 @@ def learn(policy, env, seed, nsteps, nstack, total_timesteps, gamma, vf_coef, en
 
     for update in range(1, total_timesteps//nbatch+1):
         obs, states, raw_rewards, returns, masks, actions, values = runner.run()
-        #ravg_norm_ret, ravg_norm_obs, policy_loss, value_loss, policy_entropy = model.train(obs, states, returns, masks, actions, values)
-        policy_loss, value_loss, policy_entropy = model.train(obs, states, returns, masks, actions, values)
+        ravg_norm_obs, policy_loss, value_loss, policy_entropy = model.train(obs, states, returns, masks, actions, values)
+        #policy_loss, value_loss, policy_entropy = model.train(obs, states, returns, masks, actions, values)
 
         episode_stats.feed(raw_rewards, masks)
         nseconds = time.time()-tstart
@@ -234,10 +217,7 @@ def learn(policy, env, seed, nsteps, nstack, total_timesteps, gamma, vf_coef, en
             logger.record_tabular("nupdates", update)
             logger.record_tabular("total_timesteps", update*nbatch)
             logger.record_tabular("fps", fps)
-            """
-            logger.record_tabular("avg_norm_ret", float(ravg_norm_ret))
             logger.record_tabular("avg_norm_obs", float(ravg_norm_obs))
-            """
             logger.record_tabular("policy_entropy", float(policy_entropy))
             logger.record_tabular("policy_loss", float(policy_loss))
             logger.record_tabular("value_loss", float(value_loss * vf_coef))
