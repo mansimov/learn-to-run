@@ -19,7 +19,8 @@ The code is directly taken from OpenAI Baselines and changed to work with python
 After run (make sure to fix some paths)
 
 ```
-CUDA_VISIBLE_DEVICES=0 python baselines/learntorun/run.py```
+CUDA_VISIBLE_DEVICES=0 python baselines/learntorun/run.py
+```
 
 **TODO (for now)**
 
