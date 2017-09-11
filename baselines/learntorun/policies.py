@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from baselines.a2c.utils import conv, fc, dense, conv_to_fc, batch_to_seq, seq_to_batch, lstm, lnlstm, sample, gaussian_sample, check_shape
+from baselines.learntorun.utils import conv, fc, dense, conv_to_fc, batch_to_seq, seq_to_batch, lstm, lnlstm, sample, gaussian_sample, check_shape
 from baselines.common.distributions import make_pdtype
 from baselines.common.running_mean_std import RunningMeanStd
 import baselines.common.tf_util as U

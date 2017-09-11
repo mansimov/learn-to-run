@@ -11,9 +11,9 @@ from gym.spaces import Box, Discrete
 from baselines.common import set_global_seeds, explained_variance
 from baselines.common.vec_env.subproc_vec_env import SubprocVecEnv
 
-from baselines.a2c.utils import discount_with_dones, EpisodeStats
-from baselines.a2c.utils import Scheduler, make_path, find_trainable_variables
-from baselines.a2c.utils import mse
+from baselines.learntorun.utils import discount_with_dones, EpisodeStats
+from baselines.learntorun.utils import Scheduler, make_path, find_trainable_variables
+from baselines.learntorun.utils import mse
 
 import baselines.common.tf_util as U
 
@@ -48,7 +48,6 @@ class Model(object):
         nlogpac = -train_model.pd.logp(A)
         pg_loss = tf.reduce_mean(nadv * nlogpac)
         vf_loss = tf.reduce_mean(mse(tf.squeeze(train_model.vf), nr))
-        #vf_loss = tf.reduce_mean(mse(tf.squeeze(train_model.vnorm), nr))
 
         entropy = tf.reduce_mean(train_model.pd.entropy())
         loss = pg_loss - entropy*ent_coef + vf_loss * vf_coef
@@ -118,8 +117,8 @@ class Runner(object):
     def __init__(self, env, model, nsteps, nstack, gamma, ob_dtype=np.float32):
         self.env = env
         self.model = model
-        ob_space = env.observation_space
-        ac_space = env.action_space
+        self.ob_space = ob_space = env.observation_space
+        self.ac_space = ac_space = env.action_space
 
         nenv = env.num_envs
         ob_space_shape_stacked = list(ob_space.shape)
@@ -156,7 +155,9 @@ class Runner(object):
             mb_actions.append(actions)
             mb_values.append(values)
             mb_dones.append(self.dones)
-            obs, rewards, dones, _ = self.env.step(actions)
+            scaled_actions = self.ac_space.low + (actions + 1.) * 0.5 * (self.ac_space.high - self.ac_space.low)
+            scaled_actions = np.clip(scaled_actions, self.ac_space.low, self.ac_space.high)
+            obs, rewards, dones, _ = self.env.step(scaled_actions)
             self.states = states
             self.dones = dones
             for i, done in enumerate(dones):
