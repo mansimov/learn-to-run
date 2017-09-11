@@ -194,7 +194,7 @@ class Runner(object):
 
 
 def learn(policy, env, seed, nsteps, nstack, total_timesteps, gamma, vf_coef, ent_coef,
-          max_grad_norm, lr, lrschedule, rprop_epsilon=1e-5, rprop_alpha=0.99, log_interval=100):
+          max_grad_norm, lr, lrschedule, rprop_epsilon=1e-5, rprop_alpha=0.99, log_interval=1):
     tf.reset_default_graph()
     set_global_seeds(seed)
 

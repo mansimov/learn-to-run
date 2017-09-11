@@ -24,6 +24,7 @@ CUDA_VISIBLE_DEVICES=0 python baselines/learntorun/run.py
 
 **TODO (for now)**
 
+* Tune hyperparameters
 * Add separate evaluation only on level 2 difficulty as it will be evaluated in the competition
 * Hack and play around with reward function
 * Add ACKTR for better on-policy sample efficiency
