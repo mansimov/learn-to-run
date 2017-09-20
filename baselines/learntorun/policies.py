@@ -106,13 +106,15 @@ class MlpPolicy(object):
         #obz = X
 
         with tf.variable_scope("model", reuse=reuse):
-            h1 = tf.nn.tanh(dense(obz, 64, "fc1", weight_init=U.normc_initializer(1.0), bias_init=0.0))
-            h2 = tf.nn.tanh(dense(h1, 64, "fc2", weight_init=U.normc_initializer(1.0), bias_init=0.0))
-            mean = dense(h2, nact, "mean", weight_init=U.normc_initializer(0.1), bias_init=0.0)
+            h1 = tf.nn.tanh(dense(obz, 128, "fc1", weight_init=U.normc_initializer(1.0), bias_init=0.0))
+            h2 = tf.nn.tanh(dense(h1, 128, "fc2", weight_init=U.normc_initializer(1.0), bias_init=0.0))
+            h3 = tf.nn.tanh(dense(h2, 128, "fc3", weight_init=U.normc_initializer(1.0), bias_init=0.0))
+
+            mean = dense(h3, nact, "mean", weight_init=U.normc_initializer(0.1), bias_init=0.0)
             logstd = tf.get_variable("logstd", [nact], tf.float32, tf.zeros_initializer())
             logstd = tf.expand_dims(logstd, 0)
             pdparam = U.concatenate([mean, mean * 0.0 + logstd], axis=1)
-            vf = dense(h2, 1, "v", weight_init=U.normc_initializer(1.0), bias_init=0.0)
+            vf = dense(h3, 1, "v", weight_init=U.normc_initializer(1.0), bias_init=0.0)
 
         v0 = vf[:, 0]
         self.pd = pdtype.pdfromflat(pdparam)

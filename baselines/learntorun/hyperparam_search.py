@@ -8,24 +8,30 @@ import time
 import sys
 
 flags = [['--nsteps 5', '--nsteps 20', '--nsteps 100'],\
-        ['--lr 7e-4', '--lr 7e-5'],
-        ['--max_grad_norm 1']]
+        ['--lr 7e-4', '--lr 7e-5', '--lr 7e-6'],
+        ['--max_grad_norm 1', '--max_grad_norm 10']]
 
 
 if __name__ == "__main__":
     launched = 0
     seeds = [1,2,3]
     options = itertools.product(*flags)
-    device = 0
+    device = 1
     for option in options:
         for seed in seeds:
+            """
             # hardcoded
             if launched % 6 == 0 and launched > 0:
                 device = device + 1
             # GPU 1 not working on vine14
             if device == 1:
                 device = 2
-
+            """
+            if launched % 9 == 0 and launched > 0:
+                device = device + 1
+            # hardcoded
+            if device == 3:
+                device = 4
 
             current_script = "cd /home/mansimov/projects/learn-to-run/"
             current_script += "/n"
@@ -33,7 +39,7 @@ if __name__ == "__main__":
 
 
             # write current_script to the sh file
-            script_path = "/tmp/a2c_mujoco.sh"
+            script_path = "/tmp/a2c_learntorun.sh"
             with open(script_path, 'w') as fw:
                 fw.write(current_script)
                 st = os.stat(script_path)

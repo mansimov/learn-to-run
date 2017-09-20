@@ -9,21 +9,28 @@ parser.add_argument('--seed', help='RNG seed', type=int, default=0)
 parser.add_argument('--lrschedule', help='Learning rate schedule', default='linear', choices=['constant', 'linear'])
 parser.add_argument('--million_timesteps', help='How many timesteps to train (/ 1e6).', type=int, default=1)
 parser.add_argument('--lr', help="Learning rate", type=float, default=7e-4)
-parser.add_argument('--max_grad_norm', help="Max grad norm", type=float, default=10)
-parser.add_argument('--num_cpu', help="Num cpu in parallel", type=int, default=8)
+parser.add_argument('--max_grad_norm', help="Max grad norm", type=float, default=1)
+parser.add_argument('--num_cpu', help="Num cpu in parallel", type=int, default=9)
 parser.add_argument('--nsteps', help="Num of steps to rollout", type=int, default=5)
 args = parser.parse_args()
 
-head_folder_name = "/misc/vlgscratch2/FergusGroup/mansimov/a2c-learntorun/"
+head_folder_name = "/misc/vlgscratch2/FergusGroup/mansimov/a2c-learntorun-new/"
 try:
     os.mkdir(head_folder_name)
 except:
     pass
-log_dir = os.path.join(head_folder_name, "learntorun-lr{}-max_grad_norm{}-nsteps{}-seed{}".format(args.lr, args.max_grad_norm, args.nsteps, args.seed))
+log_dir = os.path.join(head_folder_name, "learntorun-lr{}-max_grad_norm{}-nsteps{}".format(args.lr, args.max_grad_norm, args.nsteps))
 
+try:
+    os.mkdir(log_dir)
+except:
+    pass
+
+log_dir = os.path.join(log_dir, "seed-{}".format(args.seed))
 if os.path.exists(log_dir):
     shutil.rmtree(log_dir)
 os.mkdir(log_dir)
+
 os.environ["OPENAI_LOGDIR"] = log_dir
 
 import logging, gym
@@ -38,7 +45,7 @@ from baselines.learntorun.learntorun_env import LearnToRunEnv
 def train(num_timesteps, seed, lrschedule, num_cpu):
     def make_env(rank):
         def _thunk():
-            env = LearnToRunEnv()
+            env = LearnToRunEnv(difficulty=(seed+rank)%3)
             env.seed(seed + rank)
             env = bench.Monitor(env, logger.get_dir() and
                 os.path.join(logger.get_dir(), "{}.monitor.json".format(rank)))
