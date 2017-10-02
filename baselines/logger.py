@@ -190,7 +190,8 @@ def debug(*args):
 
 
 def info(*args):
-    log(*args, level=INFO)
+    #log(*args, level=INFO)
+    log(*args)
 
 
 def warn(*args):
