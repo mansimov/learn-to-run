@@ -1,6 +1,6 @@
 # Learn to Run
 
-![alt text](https://images.contentful.com/7h71s48744nc/ttbuWX4JtsGcpN25BIz41u/d6eb57c5801370b80e356e06f297f1af/Forrest-Gump-large.jpg "Logo Title Text 1")
+This is OpenAI baselines repo somewhat adapted to run in python2.7
 
 Follow instructions to install opensim-rl
 
@@ -14,19 +14,35 @@ Make sure to look at below link in case of errors
 https://github.com/stanfordnmbl/osim-rl#frequently-asked-questions
 ```
 
-The code is directly taken from OpenAI Baselines and changed to work with python 2.7 (might be some problems still)
-
-After run (make sure to fix some paths)
+Fixes to memory leaking in RunEnv
 
 ```
-CUDA_VISIBLE_DEVICES=0 python baselines/learntorun/run.py
+https://github.com/stanfordnmbl/osim-rl/issues/58
 ```
 
-**TODO (for now)**
+Regular version of PPO
+```
+CUDA_VISIBLE_DEVICES=0 python baselines/ppo1/run_mujoco.py --seed 41 --env Walker2d-v1
+```
 
-* Tune hyperparameters
-* Add separate evaluation only on level 2 difficulty as it will be evaluated in the competition
-* Hack and play around with reward function
-* Add ACKTR for better on-policy sample efficiency
-* Add ACKTR-LSTM for better results ?
-* Add PPO loss for off-policy samples
+VecEnv version of PPO (might still have bugs)
+```
+CUDA_VISIBLE_DEVICES=0 python baselines/ppo1/run_mujoco_vecenv.py --seed 41 --env Walker2d-v1
+```
+
+Note: Humanoid doesn't work with default PPO hyperparams use the following ones for now
+
+```
+pposgd_simple.learn(env, policy_fn,
+        max_timesteps=num_timesteps,
+        timesteps_per_batch=4096,
+        clip_param=0.2, entcoeff=0.0,
+        optim_epochs=10, optim_stepsize=3e-4, optim_batchsize=512,
+        gamma=0.99, lam=0.95, schedule='adapt', desired_kl=0.02,
+    )
+```
+
+LearnToRun with PPO (experimental)
+```
+CUDA_VISIBLE_DEVICES=0 python baselines/ppo1/run_mujoco_vecenv.py --seed 41 --env learntorun
+```

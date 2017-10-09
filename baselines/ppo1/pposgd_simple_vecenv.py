@@ -8,28 +8,30 @@ from baselines.common.mpi_moments import mpi_moments
 from mpi4py import MPI
 from collections import deque
 
-def traj_segment_generator(pi, env, horizon, stochastic):
+def traj_segment_generator_vecenv(pi, env, horizon, stochastic):
+    nenvs = env.num_envs
     t = 0
     ac = env.action_space.sample() # not used, just so we have the datatype
-    new = True # marks if we're on first timestep of an episode
-    ob = env.reset()
+    ac = np.repeat(np.expand_dims(ac, 0), nenvs, axis=0)
+    new = [True for ne in range(nenvs)] # marks if we're on first timestep of an episode
+    ob = env.reset() # because it has shape num_cpu x ob_shape
 
-    cur_ep_ret = 0 # return in current episode
-    cur_ep_len = 0 # len of current episode
+    cur_ep_ret = [0 for ne in range(nenvs)] # return in current episode
+    cur_ep_len = [0 for ne in range(nenvs)] # len of current episode
     ep_rets = [] # returns of completed episodes in this segment
     ep_lens = [] # lengths of ...
 
     # Initialize history arrays
-    obs = np.array([ob for _ in range(horizon)])
+    obs = np.array([ob[0] for _ in range(horizon)])
     rews = np.zeros(horizon, 'float32')
     vpreds = np.zeros(horizon, 'float32')
     news = np.zeros(horizon, 'int32')
-    acs = np.array([ac for _ in range(horizon)])
+    acs = np.array([ac[0] for _ in range(horizon)])
     prevacs = acs.copy()
 
     while True:
         prevac = ac
-        ac, vpred = pi.act(stochastic, ob)
+        ac, vpred = pi.batch_act(stochastic, ob)
         # Slight weirdness here because we need value function at time T
         # before returning segment [0, T-1] so we get the correct
         # terminal value
@@ -41,25 +43,37 @@ def traj_segment_generator(pi, env, horizon, stochastic):
             # several of these batches, then be sure to do a deepcopy
             ep_rets = []
             ep_lens = []
-        i = t % horizon
-        obs[i] = ob
-        vpreds[i] = vpred
-        news[i] = new
-        acs[i] = ac
-        prevacs[i] = prevac
 
-        ob, rew, new, _ = env.step(ac)
-        rews[i] = rew
+        for tt in range(nenvs):
+            i = (t + tt) % horizon
+            obs[i] = ob[tt]
+            vpreds[i] = vpred[tt]
+            news[i] = new[tt]
+            acs[i] = ac[tt]
+            prevacs[i] = prevac[tt]
 
-        cur_ep_ret += rew
-        cur_ep_len += 1
-        if new:
-            ep_rets.append(cur_ep_ret)
-            ep_lens.append(cur_ep_len)
-            cur_ep_ret = 0
-            cur_ep_len = 0
-            ob = env.reset()
-        t += 1
+        if "runenv" in env.spec.id.lower():
+            clipped_ac = ac.copy()
+            clipped_ac[clipped_ac<max(env.action_space.low)] = max(env.action_space.low)
+            clipped_ac[clipped_ac>min(env.action_space.high)] = min(env.action_space.high)
+            ob, rew, new, _ = env.step(clipped_ac)
+        else:
+            ob, rew, new, _ = env.step(ac)
+        for tt in range(nenvs):
+            i = (t + tt) % horizon
+            rews[i] = rew[tt]
+
+            cur_ep_ret[tt] += rew[tt]
+            cur_ep_len[tt] += 1
+
+            if new[tt]:
+                ep_rets.append(cur_ep_ret[tt])
+                ep_lens.append(cur_ep_len[tt])
+                cur_ep_ret[tt] = 0
+                cur_ep_len[tt] = 0
+                #ob = env.reset()
+
+        t += nenvs
 
 def add_vtarg_and_adv(seg, gamma, lam):
     """
@@ -85,7 +99,8 @@ def learn(env, policy_func,
         max_timesteps=0, max_episodes=0, max_iters=0, max_seconds=0,  # time constraint
         callback=None, # you can do anything in the callback, since it takes locals(), globals()
         adam_epsilon=1e-5,
-        schedule='constant' # annealing for stepsize parameters (epsilon and adam)
+        schedule='constant', # annealing for stepsize parameters (epsilon and adam)
+        desired_kl=0.02
         ):
     # Setup losses and stuff
     # ----------------------------------------
@@ -130,7 +145,7 @@ def learn(env, policy_func,
 
     # Prepare for rollouts
     # ----------------------------------------
-    seg_gen = traj_segment_generator(pi, env, timesteps_per_batch, stochastic=True)
+    seg_gen = traj_segment_generator_vecenv(pi, env, timesteps_per_batch, stochastic=True)
 
     episodes_so_far = 0
     timesteps_so_far = 0
@@ -156,6 +171,8 @@ def learn(env, policy_func,
             cur_lrmult = 1.0
         elif schedule == 'linear':
             cur_lrmult =  max(1.0 - float(timesteps_so_far) / max_timesteps, 0)
+        elif schedule == 'adapt':
+            cur_lrmult = 1.0
         else:
             raise NotImplementedError
 
@@ -183,6 +200,11 @@ def learn(env, policy_func,
                 #*newlosses, g = lossandgrad(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
                 lossandgrad_out = lossandgrad(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
                 newlosses, g = lossandgrad_out[:-1], lossandgrad_out[-1]
+                if desired_kl != None and schedule == 'adapt':
+                    if newlosses[-2] > desired_kl * 2:
+                        optim_stepsize = max(1e-8, optim_stepsize / 1.5)
+                    elif newlosses[-2] < desired_kl / 2:
+                        optim_stepsize = min(1e0, optim_stepsize * 1.5 )
                 adam.update(g, optim_stepsize * cur_lrmult)
                 losses.append(newlosses)
             logger.log(fmt_row(13, np.mean(losses, axis=0)))

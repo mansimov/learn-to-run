@@ -4,6 +4,7 @@ from gym import spaces, error
 import sys
 from osim.env import RunEnv
 import random
+from gym.envs.registration import EnvSpec
 
 class LearnToRunEnv(gym.Env):
     """Wrapping LearnToRunEnv in OpenAI Gym"""
@@ -16,16 +17,12 @@ class LearnToRunEnv(gym.Env):
 
         self.learntorun_env = RunEnv(visualize=visualize)
         self.observation_space = self.learntorun_env.observation_space
-        self.action_space = spaces.Box(low=-1.,high=1.,\
-                            shape=self.learntorun_env.action_space.shape)
-        self._action_space = self.learntorun_env.action_space
-        #self.action_space = self.learntorun_env.action_space
+        self.action_space = self.learntorun_env.action_space
+
+        self._spec = EnvSpec("RunEnv-diff{}-v1".format(difficulty))
 
     def _step(self, action):
-        # rescale back to original _action_space
-        scaled_action = self._action_space.low + (action + 1.) * 0.5 * (self._action_space.high - self._action_space.low)
-        scaled_action = np.clip(scaled_action, self._action_space.low, self._action_space.high)
-        return self.learntorun_env.step(scaled_action)
+        return self.learntorun_env.step(action)
 
     def _reset(self):
         return self.learntorun_env.reset(difficulty=self.difficulty,\
