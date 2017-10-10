@@ -8,7 +8,7 @@ parser.add_argument('--env', help='environment ID', default='Reacher-v1')
 parser.add_argument('--seed', help='RNG seed', type=int, default=0)
 args = parser.parse_args()
 
-folder_name = os.path.join(os.environ["checkpoint_dir"], "ppo-mpi")
+folder_name = os.path.join(os.environ["checkpoint_dir"], "ppo-mpi-gpu")
 try:
     os.mkdir(folder_name)
 except:

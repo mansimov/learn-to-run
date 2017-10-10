@@ -3,9 +3,6 @@ from baselines import logger
 import baselines.common.tf_util as U
 import tensorflow as tf, numpy as np
 import time
-from baselines.common.mpi_adam import MpiAdam
-from baselines.common.mpi_moments import mpi_moments
-from mpi4py import MPI
 from collections import deque
 
 def traj_segment_generator(pi, env, horizon, stochastic):
@@ -118,15 +115,21 @@ def learn(env, policy_func,
     loss_names = ["pol_surr", "pol_entpen", "vf_loss", "kl", "ent"]
 
     var_list = pi.get_trainable_variables()
-    lossandgrad = U.function([ob, ac, atarg, ret, lrmult], losses + [U.flatgrad(total_loss, var_list)])
-    adam = MpiAdam(var_list, epsilon=adam_epsilon)
 
     assign_old_eq_new = U.function([],[], updates=[tf.assign(oldv, newv)
         for (oldv, newv) in zipsame(oldpi.get_variables(), pi.get_variables())])
+
+    stepsize = tf.Variable(np.float32(np.array(optim_stepsize)), dtype=tf.float32)
+    grads = U.grad(total_loss, var_list)
+    adam = tf.train.AdamOptimizer(learning_rate=stepsize, epsilon=adam_epsilon)
+    adam_update_op = adam.apply_gradients(list(zip(grads, var_list)))
+
+    lossandgrad = U.function([ob, ac, atarg, ret, lrmult], losses + [U.flatgrad(total_loss, var_list)])
+    lossandupdate = U.function([ob, ac, atarg, ret, lrmult], losses + [adam_update_op])
+
     compute_losses = U.function([ob, ac, atarg, ret, lrmult], losses)
 
     U.initialize()
-    adam.sync()
 
     # Prepare for rollouts
     # ----------------------------------------
@@ -171,7 +174,7 @@ def learn(env, policy_func,
         d = Dataset(dict(ob=ob, ac=ac, atarg=atarg, vtarg=tdlamret), shuffle=not pi.recurrent)
         optim_batchsize = optim_batchsize or ob.shape[0]
 
-        if hasattr(pi, "ob_rms"): pi.ob_rms.update(ob) # update running mean/std for policy
+        if hasattr(pi, "ob_rms"): pi.ob_rms.update(U.get_session(), ob) # update running mean/std for policy
 
         assign_old_eq_new() # set old parameter values to new parameter values
         logger.log("Optimizing...")
@@ -180,10 +183,12 @@ def learn(env, policy_func,
         for _ in range(optim_epochs):
             losses = [] # list of tuples, each of which gives the loss for a minibatch
             for batch in d.iterate_once(optim_batchsize):
-                #*newlosses, g = lossandgrad(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
-                lossandgrad_out = lossandgrad(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
-                newlosses, g = lossandgrad_out[:-1], lossandgrad_out[-1]
-                adam.update(g, optim_stepsize * cur_lrmult)
+                #lossandgrad_out = lossandgrad(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
+                #newlosses, g = lossandgrad_out[:-1], lossandgrad_out[-1]
+                #adam.update(g, stepsize * cur_lrmult)
+
+                lossandupdate_out = lossandupdate(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
+                newlosses = lossandupdate_out[:-1]
                 losses.append(newlosses)
             logger.log(fmt_row(13, np.mean(losses, axis=0)))
 
@@ -192,14 +197,15 @@ def learn(env, policy_func,
         for batch in d.iterate_once(optim_batchsize):
             newlosses = compute_losses(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
             losses.append(newlosses)
-        meanlosses,_,_ = mpi_moments(losses, axis=0)
+        meanlosses = np.mean(np.asarray(losses), axis=0)
         logger.log(fmt_row(13, meanlosses))
         for (lossval, name) in zipsame(meanlosses, loss_names):
             logger.record_tabular("loss_"+name, lossval)
         logger.record_tabular("ev_tdlam_before", explained_variance(vpredbefore, tdlamret))
-        lrlocal = (seg["ep_lens"], seg["ep_rets"]) # local values
-        listoflrpairs = MPI.COMM_WORLD.allgather(lrlocal) # list of tuples
-        lens, rews = map(flatten_lists, zip(*listoflrpairs))
+        #lrlocal = (seg["ep_lens"], seg["ep_rets"]) # local values
+        #listoflrpairs = MPI.COMM_WORLD.allgather(lrlocal) # list of tuples
+        #lens, rews = map(flatten_lists, zip(*listoflrpairs))
+        lens, rews = seg["ep_lens"], seg["ep_rets"]
         lenbuffer.extend(lens)
         rewbuffer.extend(rews)
         logger.record_tabular("EpLenMean", np.mean(lenbuffer))
@@ -211,8 +217,9 @@ def learn(env, policy_func,
         logger.record_tabular("EpisodesSoFar", episodes_so_far)
         logger.record_tabular("TimestepsSoFar", timesteps_so_far)
         logger.record_tabular("TimeElapsed", time.time() - tstart)
-        if MPI.COMM_WORLD.Get_rank()==0:
-            logger.dump_tabular()
+        logger.dump_tabular()
+        #if MPI.COMM_WORLD.Get_rank()==0:
+        #    logger.dump_tabular()
 
 def flatten_lists(listoflists):
     return [el for list_ in listoflists for el in list_]
