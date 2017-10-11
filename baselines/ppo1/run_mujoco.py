@@ -8,6 +8,7 @@ parser.add_argument('--env', help='environment ID', default='Reacher-v1')
 parser.add_argument('--seed', help='RNG seed', type=int, default=0)
 parser.add_argument('--timesteps_per_batch', type=int, default=2048)
 parser.add_argument('--optim_batchsize', type=int, default=64)
+parser.add_argument('--million_timesteps', type=int, default=1)
 parser.add_argument('--optim_epochs', type=int, default=10)
 parser.add_argument('--schedule', type=str, default='linear')
 
@@ -70,7 +71,7 @@ def train(env_id, num_timesteps, seed):
     env.close()
 
 def main():
-    train(args.env, num_timesteps=1e6, seed=args.seed)
+    train(args.env, num_timesteps=args.million_timesteps*1e6, seed=args.seed)
 
 if __name__ == '__main__':
     main()
