@@ -122,7 +122,8 @@ def learn(env_id, seed, env, policy_func,
     assign_old_eq_new = U.function([],[], updates=[tf.assign(oldv, newv)
         for (oldv, newv) in zipsame(oldpi.get_variables(), pi.get_variables())])
 
-    stepsize = tf.Variable(np.float32(np.array(optim_stepsize)), dtype=tf.float32)
+    #stepsize = tf.Variable(np.float32(np.array(optim_stepsize)), dtype=tf.float32)
+    stepsize = tf.placeholder(name='stepsize', dtype=tf.float32, shape=[])
     grads = U.grad(total_loss, var_list)
     adam = tf.train.AdamOptimizer(learning_rate=stepsize, epsilon=adam_epsilon)
     adam_update_op = adam.apply_gradients(list(zip(grads, var_list)))
