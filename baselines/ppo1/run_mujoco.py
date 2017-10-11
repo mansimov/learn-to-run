@@ -6,6 +6,12 @@ import argparse
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--env', help='environment ID', default='Reacher-v1')
 parser.add_argument('--seed', help='RNG seed', type=int, default=0)
+parser.add_argument('--timesteps_per_batch', type=int, default=2048)
+parser.add_argument('--optim_batchsize', type=int, default=64)
+parser.add_argument('--optim_epochs', type=int, default=10)
+parser.add_argument('--schedule', type=str, default='linear')
+
+
 args = parser.parse_args()
 
 folder_name = os.path.join(os.environ["checkpoint_dir"], "ppo-mpi-gpu")
@@ -27,6 +33,7 @@ import gym, logging
 from baselines import logger
 import sys
 import tensorflow as tf
+from util import make_env
 
 def train(env_id, num_timesteps, seed):
     from baselines.ppo1 import mlp_policy, pposgd_simple
@@ -37,21 +44,17 @@ def train(env_id, num_timesteps, seed):
     tf.Session(config=tf_config).__enter__()
     #U.make_session(num_cpu=1).__enter__()
     set_global_seeds(seed)
-    env = gym.make(env_id)
     def policy_fn(name, ob_space, ac_space):
         return mlp_policy.MlpPolicy(name=name, ob_space=ob_space, ac_space=ac_space,
             hid_size=64, num_hid_layers=2)
-    env = bench.Monitor(env, logger.get_dir() and
-        osp.join(logger.get_dir(), "monitor.json"))
-    env.seed(seed)
-    gym.logger.setLevel(logging.WARN)
+    env = make_env(env_id, logger, seed)
 
-    pposgd_simple.learn(env, policy_fn,
+    pposgd_simple.learn(env_id, seed, env, policy_fn,
             max_timesteps=num_timesteps,
-            timesteps_per_batch=2048,
+            timesteps_per_batch=args.timesteps_per_batch,
             clip_param=0.2, entcoeff=0.0,
-            optim_epochs=10, optim_stepsize=3e-4, optim_batchsize=64,
-            gamma=0.99, lam=0.95, schedule='linear',
+            optim_epochs=args.optim_epochs, optim_stepsize=3e-4, optim_batchsize=args.timesteps_per_batch,
+            gamma=0.99, lam=0.95, schedule=args.schedule
         )
 
     """
@@ -64,16 +67,6 @@ def train(env_id, num_timesteps, seed):
         )
     """
 
-    """
-    # specifically for humanoid
-    pposgd_simple.learn(env, policy_fn,
-            max_timesteps=num_timesteps,
-            timesteps_per_batch=512,
-            clip_param=0.2, entcoeff=0.0,
-            optim_epochs=15, optim_stepsize=3e-4, optim_batchsize=4096,
-            gamma=0.99, lam=0.95, schedule='adapt', # add adapt
-        )
-    """
     env.close()
 
 def main():

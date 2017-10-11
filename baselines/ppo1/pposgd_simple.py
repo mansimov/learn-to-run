@@ -3,7 +3,9 @@ from baselines import logger
 import baselines.common.tf_util as U
 import tensorflow as tf, numpy as np
 import time
+import gym
 from collections import deque
+from util import make_env
 
 def traj_segment_generator(pi, env, horizon, stochastic):
     t = 0
@@ -74,7 +76,7 @@ def add_vtarg_and_adv(seg, gamma, lam):
         gaelam[t] = lastgaelam = delta + gamma * lam * nonterminal * lastgaelam
     seg["tdlamret"] = seg["adv"] + seg["vpred"]
 
-def learn(env, policy_func,
+def learn(env_id, seed, env, policy_func,
         timesteps_per_batch, # timesteps per actor per update
         clip_param, entcoeff, # clipping parameter epsilon, entropy coeff
         optim_epochs, optim_stepsize, optim_batchsize,# optimization hypers
@@ -82,7 +84,8 @@ def learn(env, policy_func,
         max_timesteps=0, max_episodes=0, max_iters=0, max_seconds=0,  # time constraint
         callback=None, # you can do anything in the callback, since it takes locals(), globals()
         adam_epsilon=1e-5,
-        schedule='constant' # annealing for stepsize parameters (epsilon and adam)
+        schedule='constant', # annealing for stepsize parameters (epsilon and adam)
+        desired_kl=0.02
         ):
     # Setup losses and stuff
     # ----------------------------------------
@@ -124,10 +127,10 @@ def learn(env, policy_func,
     adam = tf.train.AdamOptimizer(learning_rate=stepsize, epsilon=adam_epsilon)
     adam_update_op = adam.apply_gradients(list(zip(grads, var_list)))
 
-    lossandgrad = U.function([ob, ac, atarg, ret, lrmult], losses + [U.flatgrad(total_loss, var_list)])
-    lossandupdate = U.function([ob, ac, atarg, ret, lrmult], losses + [adam_update_op])
+    lossandgrad = U.function([ob, ac, atarg, ret, lrmult, stepsize], losses + [U.flatgrad(total_loss, var_list)])
+    lossandupdate = U.function([ob, ac, atarg, ret, lrmult, stepsize], losses + [adam_update_op])
 
-    compute_losses = U.function([ob, ac, atarg, ret, lrmult], losses)
+    compute_losses = U.function([ob, ac, atarg, ret, lrmult, stepsize], losses)
 
     U.initialize()
 
@@ -137,6 +140,7 @@ def learn(env, policy_func,
 
     episodes_so_far = 0
     timesteps_so_far = 0
+    timesteps_before_delete = 0
     iters_so_far = 0
     tstart = time.time()
     lenbuffer = deque(maxlen=100) # rolling buffer for episode lengths
@@ -159,6 +163,8 @@ def learn(env, policy_func,
             cur_lrmult = 1.0
         elif schedule == 'linear':
             cur_lrmult =  max(1.0 - float(timesteps_so_far) / max_timesteps, 0)
+        elif schedule == 'adapt':
+            cur_lrmult = 1.0
         else:
             raise NotImplementedError
 
@@ -186,16 +192,22 @@ def learn(env, policy_func,
                 #lossandgrad_out = lossandgrad(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
                 #newlosses, g = lossandgrad_out[:-1], lossandgrad_out[-1]
                 #adam.update(g, stepsize * cur_lrmult)
-
-                lossandupdate_out = lossandupdate(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
+                # assign stepsize
+                lossandupdate_out = lossandupdate(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult, optim_stepsize * cur_lrmult)
                 newlosses = lossandupdate_out[:-1]
+                if desired_kl != None and schedule == 'adapt':
+                    if newlosses[-2] > desired_kl * 2:
+                        optim_stepsize = max(1e-8, optim_stepsize / 1.5)
+                    elif newlosses[-2] < desired_kl / 2:
+                        optim_stepsize = min(1e0, optim_stepsize * 1.5)
+
                 losses.append(newlosses)
             logger.log(fmt_row(13, np.mean(losses, axis=0)))
 
         logger.log("Evaluating losses...")
         losses = []
         for batch in d.iterate_once(optim_batchsize):
-            newlosses = compute_losses(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
+            newlosses = compute_losses(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult, optim_stepsize * cur_lrmult)
             losses.append(newlosses)
         meanlosses = np.mean(np.asarray(losses), axis=0)
         logger.log(fmt_row(13, meanlosses))
@@ -213,11 +225,23 @@ def learn(env, policy_func,
         logger.record_tabular("EpThisIter", len(lens))
         episodes_so_far += len(lens)
         timesteps_so_far += sum(lens)
+        timesteps_before_delete += sum(lens)
+
         iters_so_far += 1
         logger.record_tabular("EpisodesSoFar", episodes_so_far)
         logger.record_tabular("TimestepsSoFar", timesteps_so_far)
         logger.record_tabular("TimeElapsed", time.time() - tstart)
         logger.dump_tabular()
+
+        # after certain number of timesteps delete env and recreate it
+        if timesteps_before_delete // 10000 > 0 and timesteps_before_delete > 0:
+            print ("Deleting env")
+            print (timesteps_before_delete, timesteps_before_delete // 10000)
+            del env
+            del seg_gen
+            env = make_env(env_id, logger, seed)
+            seg_gen = traj_segment_generator(pi, env, timesteps_per_batch, stochastic=True)
+            timesteps_before_delete = 0
         #if MPI.COMM_WORLD.Get_rank()==0:
         #    logger.dump_tabular()
 

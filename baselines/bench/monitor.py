@@ -5,6 +5,7 @@ from gym.core import Wrapper
 from os import path
 import time
 from glob import glob
+import os.path
 
 try:
     import ujson as json # Not necessary for monitor writing, but very useful for monitor loading
@@ -24,10 +25,15 @@ class Monitor(Wrapper):
         else:
             if not filename.endswith(Monitor.EXT):
                 filename = filename + "." + Monitor.EXT
-            self.f = open(filename, "wt")
-            self.logger = JSONLogger(self.f)
-            self.logger.writekvs({"t_start": self.tstart, "gym_version": gym.__version__,
-                "env_id": env.spec.id if env.spec else 'Unknown'})
+            # check if file exists first
+            if os.path.isfile(filename):
+                self.f = open(filename, "at")
+                self.logger = JSONLogger(self.f)
+            else:
+                self.f = open(filename, "wt")
+                self.logger = JSONLogger(self.f)
+                self.logger.writekvs({"t_start": self.tstart, "gym_version": gym.__version__,
+                    "env_id": env.spec.id if env.spec else 'Unknown'})
         self.allow_early_resets = allow_early_resets
         self.rewards = None
         self.needs_reset = True
@@ -55,7 +61,7 @@ class Monitor(Wrapper):
             self.f = open(filename, "r+t")
             for _ in range(nlines):
                 self.f.readline()
-            self.f.truncate()        
+            self.f.truncate()
             self.logger = JSONLogger(self.f)
 
 
@@ -137,7 +143,7 @@ def load_results(dir, raw_episodes=False):
     for header in headers[1:]:
         assert header['env_id'] == header0['env_id'], "mixing data from two envs"
     episodes = sorted(episodes, key=lambda e: e['abstime'])
-    if raw_episodes: 
+    if raw_episodes:
         return episodes
     else:
         return {

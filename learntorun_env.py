@@ -22,11 +22,13 @@ class LearnToRunEnv(gym.Env):
         self._spec = EnvSpec("RunEnv-diff{}-v1".format(difficulty))
 
     def _step(self, action):
-        return self.learntorun_env.step(action)
+        obs, reward, terminal, info = self.learntorun_env.step(action)
+        return np.asarray(obs), reward, terminal, info
 
     def _reset(self):
-        return self.learntorun_env.reset(difficulty=self.difficulty,\
+        obs = self.learntorun_env.reset(difficulty=self.difficulty,\
                                             seed=self.learntorun_seed)
+        return np.asarray(obs)
 
     def _render(self, mode='human', close=False):
         #raise NotImplementedError
@@ -39,9 +41,16 @@ class LearnToRunEnv(gym.Env):
         self.learntorun_env.close()
 
 if __name__ == "__main__":
+    import time
     env = LearnToRunEnv()
     env.seed(1)
+    timesteps = 1000
+    t1 = time.time()
     obs = env.reset()
-    for i in range(200):
+    print (type(obs))
+    for i in range(timesteps):
         obs, reward, terminal, _ = env.step(env.action_space.sample())
+        print (type(obs), type(reward), type(terminal))
+    t2 = time.time()
+    print ("{} timesteps took {} time".format(timesteps, t2 - t1))
     print ("Done")
