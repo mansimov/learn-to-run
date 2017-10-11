@@ -9,6 +9,7 @@ parser.add_argument('--env', help='environment ID', default='Reacher-v1')
 parser.add_argument('--seed', help='RNG seed', type=int, default=0)
 parser.add_argument('--num_cpu', help='Number of parallel envs', type=int, default=2)
 parser.add_argument('--million_timesteps', help='Million timesteps', type=int, default=1)
+parser.add_argument('--schedule', type=str, default='linear')
 
 args = parser.parse_args()
 
@@ -81,8 +82,8 @@ def train(env_id, num_timesteps, seed):
 
     from baselines.ppo1 import mlp_policy, pposgd_simple_vecenv
     tf_config = tf.ConfigProto(
-        inter_op_parallelism_threads=args.num_cpu,
-        intra_op_parallelism_threads=args.num_cpu)
+        inter_op_parallelism_threads=1,
+        intra_op_parallelism_threads=1)
     tf_config.gpu_options.allow_growth = True
     tf.Session(config=tf_config).__enter__()
     #U.make_session(num_cpu=1).__enter__()
@@ -99,7 +100,7 @@ def train(env_id, num_timesteps, seed):
             timesteps_per_batch=2048,
             clip_param=0.2, entcoeff=0.0,
             optim_epochs=10, optim_stepsize=3e-4, optim_batchsize=64,
-            gamma=0.99, lam=0.95, schedule='linear',
+            gamma=0.99, lam=0.95, schedule=args.schedule,
         )
 
     env.close()

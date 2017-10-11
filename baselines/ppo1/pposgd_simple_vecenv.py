@@ -43,9 +43,10 @@ def traj_segment_generator_vecenv(pi, env, horizon, stochastic):
             # several of these batches, then be sure to do a deepcopy
             ep_rets = []
             ep_lens = []
+            t = 0
 
         for tt in range(nenvs):
-            i = (t + tt) % horizon
+            i = (t + tt)# % horizon
             obs[i] = ob[tt]
             vpreds[i] = vpred[tt]
             news[i] = new[tt]
@@ -59,8 +60,9 @@ def traj_segment_generator_vecenv(pi, env, horizon, stochastic):
             ob, rew, new, _ = env.step(clipped_ac)
         else:
             ob, rew, new, _ = env.step(ac)
+
         for tt in range(nenvs):
-            i = (t + tt) % horizon
+            i = (t + tt)# % horizon
             rews[i] = rew[tt]
 
             cur_ep_ret[tt] += rew[tt]
@@ -188,7 +190,7 @@ def learn(env, policy_func,
         d = Dataset(dict(ob=ob, ac=ac, atarg=atarg, vtarg=tdlamret), shuffle=not pi.recurrent)
         optim_batchsize = optim_batchsize or ob.shape[0]
 
-        if hasattr(pi, "ob_rms"): pi.ob_rms.update(ob) # update running mean/std for policy
+        if hasattr(pi, "ob_rms"): pi.ob_rms.update(U.get_session(), ob) # update running mean/std for policy
 
         assign_old_eq_new() # set old parameter values to new parameter values
         logger.log("Optimizing...")

@@ -47,7 +47,14 @@ def traj_segment_generator(pi, env, horizon, stochastic):
         acs[i] = ac
         prevacs[i] = prevac
 
-        ob, rew, new, _ = env.step(ac)
+        if "runenv" in env.spec.id.lower():
+            clipped_ac = ac.copy()
+            clipped_ac[clipped_ac<max(env.action_space.low)] = max(env.action_space.low)
+            clipped_ac[clipped_ac>min(env.action_space.high)] = min(env.action_space.high)
+            ob, rew, new, _ = env.step(clipped_ac)
+        else:
+            ob, rew, new, _ = env.step(ac)
+
         rews[i] = rew
 
         cur_ep_ret += rew
@@ -234,6 +241,7 @@ def learn(env_id, seed, env, policy_func,
         logger.record_tabular("TimeElapsed", time.time() - tstart)
         logger.dump_tabular()
 
+        """
         # after certain number of timesteps delete env and recreate it
         if timesteps_before_delete // 10000 > 0 and timesteps_before_delete > 0:
             print ("Deleting env")
@@ -243,6 +251,7 @@ def learn(env_id, seed, env, policy_func,
             env = make_env(env_id, logger, seed)
             seg_gen = traj_segment_generator(pi, env, timesteps_per_batch, stochastic=True)
             timesteps_before_delete = 0
+        """
         #if MPI.COMM_WORLD.Get_rank()==0:
         #    logger.dump_tabular()
 
