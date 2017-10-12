@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import os, sys, shutil, argparse
 sys.path.append(os.getcwd())
+from mpi4py import MPI
+
 
 import argparse
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -34,7 +36,6 @@ import gym, logging
 from baselines import logger
 import sys
 import tensorflow as tf
-from mpi4py import MPI
 
 
 def train(env_id, num_timesteps, seed):
@@ -47,13 +48,14 @@ def train(env_id, num_timesteps, seed):
     tf.Session(config=tf_config).__enter__()
     """
     U.make_session(num_cpu=1).__enter__()
+    rank = MPI.COMM_WORLD.Get_rank()
+    if rank != 0: logger.set_level(logger.DISABLED)
     #U.make_session(num_cpu=1).__enter__()
     set_global_seeds(seed)
     env = gym.make(env_id)
     def policy_fn(name, ob_space, ac_space):
         return mlp_policy.MlpPolicy(name=name, ob_space=ob_space, ac_space=ac_space,
             hid_size=64, num_hid_layers=2)
-    rank = MPI.COMM_WORLD.Get_rank()
     env = bench.Monitor(env, logger.get_dir() and
         osp.join(logger.get_dir(), "{}.monitor.json".format(rank)))
     env.seed(seed+rank)
