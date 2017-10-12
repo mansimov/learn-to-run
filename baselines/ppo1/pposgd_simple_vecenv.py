@@ -7,7 +7,8 @@ from baselines.common.mpi_adam import MpiAdam
 from baselines.common.mpi_moments import mpi_moments
 from mpi4py import MPI
 from collections import deque
-
+import copy
+'''
 def traj_segment_generator_vecenv(pi, env, horizon, stochastic):
     nenvs = env.num_envs
     t = 0
@@ -22,15 +23,15 @@ def traj_segment_generator_vecenv(pi, env, horizon, stochastic):
     ep_lens = [] # lengths of ...
 
     # Initialize history arrays
-    obs = np.array([ob[0] for _ in range(horizon)])
+    obs = np.array([copy.deepcopy(ob[0]) for _ in range(horizon)])
     rews = np.zeros(horizon, 'float32')
     vpreds = np.zeros(horizon, 'float32')
     news = np.zeros(horizon, 'int32')
-    acs = np.array([ac[0] for _ in range(horizon)])
+    acs = np.array([copy.deepcopy(ac[0]) for _ in range(horizon)])
     prevacs = acs.copy()
 
     while True:
-        prevac = ac
+        prevac = copy.deepcopy(ac)
         ac, vpred = pi.batch_act(stochastic, ob)
         # Slight weirdness here because we need value function at time T
         # before returning segment [0, T-1] so we get the correct
@@ -43,16 +44,16 @@ def traj_segment_generator_vecenv(pi, env, horizon, stochastic):
             # several of these batches, then be sure to do a deepcopy
             ep_rets = []
             ep_lens = []
-            t = 0
 
         for tt in range(nenvs):
-            i = (t + tt)# % horizon
-            obs[i] = ob[tt]
-            vpreds[i] = vpred[tt]
-            news[i] = new[tt]
-            acs[i] = ac[tt]
-            prevacs[i] = prevac[tt]
+            i = (t + tt) % horizon
+            obs[i] = np.copy(ob[tt])
+            vpreds[i] = np.copy(vpred[tt])
+            news[i] = np.copy(new[tt])
+            acs[i] = np.copy(ac[tt])
+            prevacs[i] = np.copy(prevac[tt])
 
+        """
         if "runenv" in env.spec.id.lower():
             clipped_ac = ac.copy()
             clipped_ac[clipped_ac<max(env.action_space.low)] = max(env.action_space.low)
@@ -60,10 +61,12 @@ def traj_segment_generator_vecenv(pi, env, horizon, stochastic):
             ob, rew, new, _ = env.step(clipped_ac)
         else:
             ob, rew, new, _ = env.step(ac)
+        """
+        ob, rew, new, _ = env.step(ac)
 
         for tt in range(nenvs):
-            i = (t + tt)# % horizon
-            rews[i] = rew[tt]
+            i = (t + tt) % horizon
+            rews[i] = np.copy(rew[tt])
 
             cur_ep_ret[tt] += rew[tt]
             cur_ep_len[tt] += 1
@@ -93,6 +96,90 @@ def add_vtarg_and_adv(seg, gamma, lam):
         gaelam[t] = lastgaelam = delta + gamma * lam * nonterminal * lastgaelam
     seg["tdlamret"] = seg["adv"] + seg["vpred"]
 
+'''
+def traj_segment_generator_vecenv(pi, env, horizon, stochastic):
+    t = 0
+    nenvs = env.num_envs
+    ac = env.action_space.sample() # not used, just so we have the datatype
+    ac = np.repeat(np.expand_dims(ac, 0), nenvs, axis=0)
+    new = [True for ne in range(nenvs)] # marks if we're on first timestep of an episode
+    ob = env.reset()
+
+    cur_ep_ret = [0 for ne in range(nenvs)] # return in current episode
+    cur_ep_len = [0 for ne in range(nenvs)] # len of current episode
+    ep_rets = [] # returns of completed episodes in this segment
+    ep_lens = [] # lengths of ...
+
+    # Initialize history arrays
+    obs = [np.array([ob[0] for _ in range(horizon//nenvs)]) for _ in range(nenvs)]
+    rews = [np.zeros(horizon//nenvs, 'float32') for _ in range(nenvs)]
+    vpreds = [np.zeros(horizon//nenvs, 'float32') for _ in range(nenvs)]
+    news = [np.zeros(horizon//nenvs, 'int32') for _ in range(nenvs)]
+    acs = [np.array([ac[0] for _ in range(horizon//nenvs)]) for _ in range(nenvs)]
+    prevacs = copy.deepcopy(acs)
+
+    sub_t = 0
+    while True:
+        prevac = copy.deepcopy(ac)
+        ac, vpred = pi.batch_act(stochastic, ob)
+        # Slight weirdness here because we need value function at time T
+        # before returning segment [0, T-1] so we get the correct
+        # terminal value
+        if t > 0 and t % horizon == 0:
+            yield {"ob" : obs, "rew" : rews, "vpred" : vpreds, "new" : news,
+                    "ac" : acs, "prevac" : prevacs, "nextvpred": vpred * (1 - new),
+                    "ep_rets" : ep_rets, "ep_lens" : ep_lens}
+            # Be careful!!! if you change the downstream algorithm to aggregate
+            # several of these batches, then be sure to do a deepcopy
+            ep_rets = []
+            ep_lens = []
+            sub_t = 0
+
+        i = t % horizon
+        for tt in range(nenvs):
+            obs[tt][sub_t] = ob[tt]
+            vpreds[tt][sub_t] = vpred[tt]
+            news[tt][sub_t] = new[tt]
+            acs[tt][sub_t] = ac[tt]
+            prevacs[tt][sub_t] = prevac[tt]
+
+        ob, rew, new, _ = env.step(ac)
+
+        for tt in range(nenvs):
+            rews[tt][sub_t] = rew[tt]
+
+            cur_ep_ret[tt] += rew[tt]
+            cur_ep_len[tt] += 1
+            if new[tt]:
+                ep_rets.append(cur_ep_ret[tt])
+                ep_lens.append(cur_ep_len[tt])
+                cur_ep_ret[tt] = 0
+                cur_ep_len[tt] = 0
+        t += nenvs
+        sub_t += 1
+
+def add_vtarg_and_adv(seg, gamma, lam, nenvs):
+    """
+    Compute target value using TD(lambda) estimator, and advantage with GAE(lambda)
+    """
+    for tt in range(nenvs):
+        new = np.append(seg["new"][tt], 0) # last element is only used for last vtarg, but we already zeroed it if last new = 1
+        vpred = np.append(seg["vpred"][tt], seg["nextvpred"][tt])
+        T = len(seg["rew"][tt])
+        if "adv" not in seg.keys():
+            seg["adv"] = [None]*nenvs
+        seg["adv"][tt] = gaelam = np.empty(T, 'float32')
+        rew = seg["rew"][tt]
+        lastgaelam = 0
+        for t in reversed(range(T)):
+            nonterminal = 1-new[t+1]
+            delta = rew[t] + gamma * vpred[t+1] * nonterminal - vpred[t]
+            gaelam[t] = lastgaelam = delta + gamma * lam * nonterminal * lastgaelam
+        if "tdlamret" not in seg.keys():
+            seg["tdlamret"] = [None]*nenvs
+        seg["tdlamret"][tt] = seg["adv"][tt] + seg["vpred"][tt]
+
+
 def learn(env, policy_func,
         timesteps_per_batch, # timesteps per actor per update
         clip_param, entcoeff, # clipping parameter epsilon, entropy coeff
@@ -102,12 +189,13 @@ def learn(env, policy_func,
         callback=None, # you can do anything in the callback, since it takes locals(), globals()
         adam_epsilon=1e-5,
         schedule='constant', # annealing for stepsize parameters (epsilon and adam)
-        desired_kl=0.02
+        desired_kl=None
         ):
     # Setup losses and stuff
     # ----------------------------------------
     ob_space = env.observation_space
     ac_space = env.action_space
+    nenvs = env.num_envs
     pi = policy_func("pi", ob_space, ac_space) # Construct network for new policy
     oldpi = policy_func("oldpi", ob_space, ac_space) # Network for old policy
     atarg = tf.placeholder(dtype=tf.float32, shape=[None]) # Target advantage function (if applicable)
@@ -181,7 +269,13 @@ def learn(env, policy_func,
         logger.log("********** Iteration %i ************"%iters_so_far)
 
         seg = seg_gen.next()
-        add_vtarg_and_adv(seg, gamma, lam)
+        add_vtarg_and_adv(seg, gamma, lam, nenvs)
+
+
+        # merge all of the envs
+        for k in seg.keys():
+            if k != "ep_rets" and k != "ep_lens" and k != "nextvpred":
+                seg[k] = np.concatenate(np.asarray(seg[k]), axis=0)
 
         # ob, ac, atarg, ret, td1ret = map(np.concatenate, (obs, acs, atargs, rets, td1rets))
         ob, ac, atarg, tdlamret = seg["ob"], seg["ac"], seg["adv"], seg["tdlamret"]
@@ -190,7 +284,7 @@ def learn(env, policy_func,
         d = Dataset(dict(ob=ob, ac=ac, atarg=atarg, vtarg=tdlamret), shuffle=not pi.recurrent)
         optim_batchsize = optim_batchsize or ob.shape[0]
 
-        if hasattr(pi, "ob_rms"): pi.ob_rms.update(U.get_session(), ob) # update running mean/std for policy
+        if hasattr(pi, "ob_rms"): pi.ob_rms.update(ob) # update running mean/std for policy
 
         assign_old_eq_new() # set old parameter values to new parameter values
         logger.log("Optimizing...")
@@ -200,8 +294,8 @@ def learn(env, policy_func,
             losses = [] # list of tuples, each of which gives the loss for a minibatch
             for batch in d.iterate_once(optim_batchsize):
                 #*newlosses, g = lossandgrad(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
-                lossandgrad_out = lossandgrad(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
-                newlosses, g = lossandgrad_out[:-1], lossandgrad_out[-1]
+                lossandgradout = lossandgrad(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
+                newlosses, g = lossandgradout[:-1], lossandgradout[-1]
                 if desired_kl != None and schedule == 'adapt':
                     if newlosses[-2] > desired_kl * 2:
                         optim_stepsize = max(1e-8, optim_stepsize / 1.5)

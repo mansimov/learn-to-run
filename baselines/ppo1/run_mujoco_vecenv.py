@@ -7,8 +7,8 @@ import argparse
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--env', help='environment ID', default='Reacher-v1')
 parser.add_argument('--seed', help='RNG seed', type=int, default=0)
-parser.add_argument('--num_cpu', help='Number of parallel envs', type=int, default=2)
-parser.add_argument('--million_timesteps', help='Million timesteps', type=int, default=1)
+parser.add_argument('--num_cpu', help='Number of parallel envs', type=int, default=4)
+parser.add_argument('--million_timesteps', help='Million timesteps', type=int, default=100)
 parser.add_argument('--schedule', type=str, default='linear')
 
 args = parser.parse_args()
@@ -18,7 +18,7 @@ try:
     os.mkdir(folder_name)
 except:
     pass
-log_dir = os.path.join(folder_name, "{}-seed{}".format(args.env, args.seed))
+log_dir = os.path.join(folder_name, "{}-num_cpu{}-seed{}".format(args.env, args.num_cpu, args.seed))
 if os.path.exists(log_dir):
     shutil.rmtree(log_dir)
 os.mkdir(log_dir)
