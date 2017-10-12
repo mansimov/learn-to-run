@@ -1,3 +1,4 @@
+from __future__ import division
 from baselines.common import Dataset, explained_variance, fmt_row, zipsame
 from baselines import logger
 import baselines.common.tf_util as U
@@ -41,6 +42,7 @@ def traj_segment_generator(pi, env, horizon, stochastic):
             # several of these batches, then be sure to do a deepcopy
             ep_rets = []
             ep_lens = []
+
         i = t % horizon
         obs[i] = ob
         vpreds[i] = vpred
@@ -48,7 +50,13 @@ def traj_segment_generator(pi, env, horizon, stochastic):
         acs[i] = ac
         prevacs[i] = prevac
 
-        ob, rew, new, _ = env.step(ac)
+        if "runenv" in env.spec.id.lower():
+            clipped_ac = ac.copy()
+            clipped_ac[clipped_ac<max(env.action_space.low)] = max(env.action_space.low)
+            clipped_ac[clipped_ac>min(env.action_space.high)] = min(env.action_space.high)
+            ob, rew, new, _ = env.step(clipped_ac)
+        else:
+            ob, rew, new, _ = env.step(ac)
         rews[i] = rew
 
         cur_ep_ret += rew
@@ -86,7 +94,7 @@ def learn(env, policy_func,
         callback=None, # you can do anything in the callback, since it takes locals(), globals()
         adam_epsilon=1e-5,
         schedule='constant', # annealing for stepsize parameters (epsilon and adam)
-        desired_kl=None # desired kl for adjusting ADAM stepsize
+        desired_kl=0.02 # desired kl for adjusting ADAM stepsize
         ):
     # Setup losses and stuff
     # ----------------------------------------
